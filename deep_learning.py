@@ -3,10 +3,10 @@ deep_learning.py
 Tugas: Pertemuan 12 - Deep Learning (INDIVIDU)
 Nama : Muhammad Raka Razzani
 NIM  : 434241056
-Dataset: Cardiovascular Disease (Kaggle / OpenML ID 45547)
+Dataset: BlaBla.xlsx (Variabel Input: UMUR_TAHUN, B..M | Output: N)
 
 Program ini membangun model Neural Network (Sequential MLP)
-untuk klasifikasi biner risiko penyakit kardiovaskular (cardio: 0 / 1).
+untuk klasifikasi biner pada dataset BlaBla.xlsx.
 """
 
 # ========================================================================
@@ -40,67 +40,104 @@ tf.random.set_seed(42)
 # ========================================================================
 base_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
 candidate_paths = [
-    os.path.join(base_dir, "dataset-csv-input", "cardio_train.csv"),
-    os.path.join(base_dir, "cardio_train.csv"),
+    os.path.join(base_dir, "dataset-csv-input", "BlaBla.xlsx"),
+    os.path.join(base_dir, "BlaBla.xlsx"),
 ]
 data_path = next((p for p in candidate_paths if os.path.exists(p)), None)
 if data_path is None:
     raise FileNotFoundError(
-        "File 'cardio_train.csv' tidak ditemukan di 'dataset-csv-input/' maupun direktori kerja saat ini."
+        "File 'BlaBla.xlsx' tidak ditemukan di 'dataset-csv-input/' maupun direktori kerja saat ini."
     )
 
 result_dir = os.path.join(base_dir, "dataset-csv-result")
 os.makedirs(result_dir, exist_ok=True)
 
-# Dataset Cardiovascular Disease memakai pemisah titik koma (;) dan kolom id tidak digunakan
-df = pd.read_csv(data_path, sep=";").drop(columns=["id"])
-# Tandai duplikat persis sebelum age di-binning agar pasien berbeda usia tetap terjaga
-not_dup_mask = ~df.duplicated(keep="first")
-n_raw_dup = int((~not_dup_mask).sum())
+df = pd.read_excel(data_path)
+
+# Buang kolom kosong 'Unnamed: ...' dan kolom formula Excel 'A'
+# (Binning Umur akan dilakukan langsung di Python dari UMUR_TAHUN sesuai Langkah 4a modul)
+unnamed_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
+cols_to_drop = unnamed_cols + (["A"] if "A" in df.columns else [])
+if cols_to_drop:
+    df = df.drop(columns=cols_to_drop)
+
+# Pastikan kolom target N bertipe integer (0 / 1)
+df["N"] = pd.to_numeric(df["N"], errors="raise").astype(int)
 
 print("=" * 70)
-print("DEEP LEARNING - KLASIFIKASI PENYAKIT KARDIOVASKULAR (Cardio)")
+print("DEEP LEARNING - KLASIFIKASI BINER DATASET BlaBla.xlsx")
 print("=" * 70)
 print(f"\n[1] Dataset dimuat dari: {data_path}")
-print(f"    Shape (setelah drop 'id'): {df.shape[0]} baris x {df.shape[1]} kolom")
+print(f"    Shape (setelah drop {cols_to_drop}): {df.shape[0]} baris x {df.shape[1]} kolom")
 print(f"    Kolom: {list(df.columns)}")
-print("\n    Preview 5 baris pertama (age masih dalam satuan hari):")
+print("\n    Preview 5 baris pertama:")
 print(df.head())
 
 
 # ========================================================================
 # 3. PISAHKAN FITUR (X) DAN LABEL (y)
 # ========================================================================
-# Variabel Input  : 11 fitur (age, gender, height, weight, ap_hi, ap_lo,
-#                   cholesterol, gluc, smoke, alco, active)
-# Variabel Output : cardio (0 = tidak ada penyakit, 1 = ada penyakit kardiovaskular)
+# Variabel Input  : 13 fitur (UMUR_TAHUN, B, C, D, E, F, G, H, I, J, K, L, M)
+# Variabel Output : N (target biner 0 / 1)
 
-X = df.drop(columns=["cardio"]).copy()
-y = df["cardio"].copy()
-initial_class_counts = y.value_counts().sort_index().to_dict()
+X = df.drop(columns=["N"]).copy()
+y = df["N"].copy()
+class_counts = y.value_counts().sort_index().to_dict()
 
 print("\n[2] Pemisahan Fitur (X) dan Label (y)")
-print(f"    X (fitur) : {X.shape} -> {X.shape[1]} fitur")
-print(f"    y (label) : {y.shape} -> target biner (0/1)")
-print(f"\n    Distribusi kelas y awal: {initial_class_counts}")
+print(f"    X (fitur) : {X.shape} -> {X.shape[1]} fitur ({list(X.columns)})")
+print(f"    y (label) : {y.shape} -> target biner N (0/1)")
+print(f"\n    Distribusi kelas y: {class_counts}")
 print(f"    Rasio (%): {y.value_counts(normalize=True).sort_index().mul(100).round(2).to_dict()}")
 
 
 # ========================================================================
-# 4. KONVERSI & BINNING VARIABEL UMUR (ENCODING)
+# 4. PREPROCESSING DATA (MISSING VALUE, OUTLIER, BINNING UMUR)
 # ========================================================================
-# Catatan: Di cardio_train.csv, age dicatat dalam satuan hari.
-# Bagi 365 terlebih dahulu sebelum binning sesuai aturan modul:
-#   1 = <= 20 | 2 = 21 - 30 | 3 = 31 - 40 | 4 = 41 - 50 | 5 = > 50
-print("\n[3] Konversi & Binning Variabel Umur (age)")
+print("\n[3] Preprocessing Data")
 
-age_years = (X["age"] / 365).astype(int)
-print(f"    Usia minimum (tahun): {age_years.min()}")
-print(f"    Usia maksimum (tahun): {age_years.max()}")
+# a. Cek & Tangani Nilai Non-Numerik / Missing Value
+print("\n    a. Cek Missing Value & Nilai Non-Numerik:")
+non_numeric_age = pd.to_numeric(X["UMUR_TAHUN"], errors="coerce").isnull() & X["UMUR_TAHUN"].notnull()
+if non_numeric_age.any():
+    bad_vals = X.loc[non_numeric_age, "UMUR_TAHUN"].tolist()
+    print(f"       Ditemukan {int(non_numeric_age.sum())} nilai non-numerik di UMUR_TAHUN: {bad_vals} -> diubah ke NaN")
+
+X["UMUR_TAHUN"] = pd.to_numeric(X["UMUR_TAHUN"], errors="coerce")
+missing = X.isnull().sum()
+total_missing = int(missing.sum()) + int(y.isnull().sum())
+print(f"       Total missing value pada X & y: {total_missing}")
+if total_missing > 0:
+    print(missing[missing > 0])
+    X = X.fillna(X.median(numeric_only=True))
+    print(f"       -> Missing value diisi dengan MEDIAN (UMUR_TAHUN median = {X['UMUR_TAHUN'].median():.1f})")
+
+# b. Handle Outlier pada fitur numerik kontinu (UMUR_TAHUN) dengan IQR Clipping
+# Catatan: Fitur B..M bernilai biner (0/1) dan konstanta (M=1), sehingga tidak dikenai IQR.
+print("\n    b. Handle Outlier (IQR Clipping pada fitur numerik kontinu UMUR_TAHUN):")
+q1 = X["UMUR_TAHUN"].quantile(0.25)
+q3 = X["UMUR_TAHUN"].quantile(0.75)
+iqr = q3 - q1
+lower_bound = max(0.0, q1 - 1.5 * iqr)
+upper_bound = q3 + 1.5 * iqr
+n_outlier_age = int(((X["UMUR_TAHUN"] < lower_bound) | (X["UMUR_TAHUN"] > upper_bound)).sum())
+X["UMUR_TAHUN"] = X["UMUR_TAHUN"].clip(lower_bound, upper_bound)
+print(f"       UMUR_TAHUN : Q1={q1:.1f}, Q3={q3:.1f}, batas=[{lower_bound:.1f}, {upper_bound:.1f}] -> {n_outlier_age} outlier di-clip")
+print("       Fitur B..M : SKIP IQR (sudah berupa fitur biner 0/1 & konstanta M=1)")
+
+# Cek informasi baris identik (dipertahankan karena tidak ada kolom ID & fitur mayoritas biner survei)
+n_identical = int(pd.concat([X, y], axis=1).duplicated().sum())
+print(f"       Info pola identik (tanpa ID): {n_identical} baris (dipertahankan sesuai profil responden)")
+
+# c. Kategori / Encoding Variabel Umur (Binning sesuai Langkah 4a modul)
+# Aturan modul: 1 = <= 20 | 2 = 21 - 30 | 3 = 31 - 40 | 4 = 41 - 50 | 5 = > 50
+print("\n[4] Kategori / Binning Variabel Umur (UMUR_TAHUN)")
+print(f"    Usia minimum (tahun): {X['UMUR_TAHUN'].min():.0f}")
+print(f"    Usia maksimum (tahun): {X['UMUR_TAHUN'].max():.0f}")
 
 age_bins = [-np.inf, 20, 30, 40, 50, np.inf]
 age_labels = [1, 2, 3, 4, 5]
-X["age"] = pd.cut(age_years, bins=age_bins, labels=age_labels, right=True).astype(int)
+X["UMUR_TAHUN"] = pd.cut(X["UMUR_TAHUN"], bins=age_bins, labels=age_labels, right=True).astype(int)
 
 age_bin_names = {
     1: "<= 20",
@@ -109,83 +146,23 @@ age_bin_names = {
     4: "41 - 50",
     5: "> 50",
 }
-age_dist = X["age"].value_counts().reindex(age_labels, fill_value=0)
-print("\n    Distribusi kelompok umur setelah binning (sebelum pembersihan outlier):")
+age_dist = X["UMUR_TAHUN"].value_counts().reindex(age_labels, fill_value=0)
+print("\n    Distribusi kelompok umur setelah binning:")
 for code, count in age_dist.items():
-    print(f"       Kategori {code} ({age_bin_names[code]:7s}): {count:6d} data")
-if age_dist[1] == 0:
-    print("    -> Catatan: Tidak ada sampel pada kategori 1 (<= 20) karena usia min dataset =", age_years.min())
-
-
-# ========================================================================
-# 5. PREPROCESSING DATA (MISSING VALUE, DUPLIKAT, OUTLIER, SCALING)
-# ========================================================================
-print("\n[4] Preprocessing Data")
-
-# a. Cek Missing Value
-print("\n    a. Cek Missing Value:")
-missing = X.isnull().sum()
-total_missing = int(missing.sum()) + int(y.isnull().sum())
-print(f"       Total missing value pada X & y: {total_missing}")
-if total_missing > 0:
-    print(missing[missing > 0])
-    X = X.fillna(X.median(numeric_only=True))
-    print("       -> Missing value diisi dengan MEDIAN.")
-
-# b. Handle Outlier pada fitur pengukuran fisik kontinu + konsistensi tekanan darah
-# Penting: IQR TIDAK diterapkan ke fitur kategorikal/biner (gender, cholesterol,
-# gluc, smoke, alco, active, age ter-binning) agar kategori minoritas tidak hilang.
-print("\n    b. Deteksi & Pembersihan Outlier (IQR pada Fitur Kontinu + Validasi Medis BP):")
-continuous_cols = ["height", "weight", "ap_hi", "ap_lo"]
-valid_mask = pd.Series(True, index=X.index)
-
-for col in continuous_cols:
-    q1 = X[col].quantile(0.25)
-    q3 = X[col].quantile(0.75)
-    iqr = q3 - q1
-    lower = q1 - 1.5 * iqr
-    upper = q3 + 1.5 * iqr
-    col_mask = (X[col] >= lower) & (X[col] <= upper)
-    n_out = int((~col_mask).sum())
-    print(f"       {col:10s}: batas IQR [{lower:6.1f}, {upper:6.1f}] -> {n_out:5d} outlier")
-    valid_mask &= col_mask
-
-# Pastikan tekanan sistolik (ap_hi) lebih besar daripada diastolik (ap_lo)
-bp_valid_mask = X["ap_hi"] > X["ap_lo"]
-print(f"       Validasi ap_hi > ap_lo : {int((~bp_valid_mask).sum()):5d} baris tidak konsisten")
-valid_mask &= bp_valid_mask
-
-n_before = len(X)
-X = X.loc[valid_mask].copy()
-y = y.loc[valid_mask].copy()
-n_after_outlier = len(X)
-print(f"    -> Baris setelah pembersihan outlier: {n_after_outlier} dari {n_before} ({n_before - n_after_outlier} dihapus)")
-
-# Hapus baris duplikat persis (dievaluasi dari data asli sebelum binning age)
-dup_keep_mask = not_dup_mask.loc[X.index]
-n_dup = int((~dup_keep_mask).sum())
-X = X.loc[dup_keep_mask].copy()
-y = y.loc[dup_keep_mask].copy()
-df_clean = pd.concat([X, y], axis=1)
-print(f"    -> Baris duplikat asli ditemukan & dihapus: {n_dup} (dari {n_raw_dup} total di data mentah)")
-print(f"    -> Sisa data bersih: {len(X)} baris")
-
-clean_class_counts = y.value_counts().sort_index().to_dict()
-print(f"    -> Distribusi kelas y setelah cleaning : {clean_class_counts}")
-print(f"       Rasio (%) : {y.value_counts(normalize=True).sort_index().mul(100).round(2).to_dict()}")
+    print(f"       Kategori {code} ({age_bin_names[code]:7s}): {count:5d} data")
 
 # Simpan dataset bersih ke folder dataset-csv-result
-clean_csv_path = os.path.join(result_dir, "cardio_train_clean.csv")
+df_clean = pd.concat([X, y], axis=1)
+clean_csv_path = os.path.join(result_dir, "blabla_clean.csv")
 df_clean.to_csv(clean_csv_path, index=False)
-print(f"    -> Dataset bersih disimpan ke: {clean_csv_path}")
+print(f"\n    -> Dataset bersih disimpan ke: {clean_csv_path}")
 
 # Visualisasi ringkasan preprocessing (untuk dokumentasi laporan Langkah 4)
-age_dist_clean = X["age"].value_counts().reindex(age_labels, fill_value=0)
 fig_prep, axes_prep = plt.subplots(1, 2, figsize=(13, 4.8))
 
 bin_labels_plot = [f"{k}\n({age_bin_names[k]})" for k in age_labels]
-bars_age = axes_prep[0].bar(bin_labels_plot, age_dist_clean.values, color="#1565C0", alpha=0.85)
-axes_prep[0].set_title("Distribusi Kategori Umur Setelah Binning & Cleaning")
+bars_age = axes_prep[0].bar(bin_labels_plot, age_dist.values, color="#1565C0", alpha=0.85)
+axes_prep[0].set_title("Distribusi Kategori Umur Setelah Binning")
 axes_prep[0].set_xlabel("Kategori Umur")
 axes_prep[0].set_ylabel("Jumlah Data")
 axes_prep[0].grid(axis="y", alpha=0.3)
@@ -193,22 +170,16 @@ for bar in bars_age:
     h = int(bar.get_height())
     axes_prep[0].text(bar.get_x() + bar.get_width() / 2, h, f"{h:,}", ha="center", va="bottom", fontsize=9)
 
-x_pos = np.arange(2)
-width = 0.35
-before_vals = [initial_class_counts.get(0, 0), initial_class_counts.get(1, 0)]
-after_vals = [clean_class_counts.get(0, 0), clean_class_counts.get(1, 0)]
-b1 = axes_prep[1].bar(x_pos - width / 2, before_vals, width, label="Sebelum Outlier Removal", color="#90CAF9")
-b2 = axes_prep[1].bar(x_pos + width / 2, after_vals, width, label="Sesudah Outlier Removal", color="#2E7D32")
-axes_prep[1].set_title("Distribusi Target (cardio) Sebelum vs Sesudah Cleaning")
-axes_prep[1].set_xticks(x_pos)
-axes_prep[1].set_xticklabels(["Tidak Sakit (0)", "Cardiovascular (1)"])
+target_labels_plot = ["Kelas 0", "Kelas 1"]
+target_vals = [class_counts.get(0, 0), class_counts.get(1, 0)]
+bars_target = axes_prep[1].bar(target_labels_plot, target_vals, color=["#2E7D32", "#C62828"], alpha=0.85)
+axes_prep[1].set_title("Distribusi Kelas Target (N)")
+axes_prep[1].set_xlabel("Kelas Target")
 axes_prep[1].set_ylabel("Jumlah Data")
-axes_prep[1].legend()
 axes_prep[1].grid(axis="y", alpha=0.3)
-for bars in (b1, b2):
-    for bar in bars:
-        h = int(bar.get_height())
-        axes_prep[1].text(bar.get_x() + bar.get_width() / 2, h, f"{h:,}", ha="center", va="bottom", fontsize=8.5)
+for bar in bars_target:
+    h = int(bar.get_height())
+    axes_prep[1].text(bar.get_x() + bar.get_width() / 2, h, f"{h:,}", ha="center", va="bottom", fontsize=9)
 
 plt.tight_layout()
 prep_viz_path = os.path.join(result_dir, "viz_preprocessing_overview.png")
@@ -218,7 +189,7 @@ plt.show()
 
 
 # ========================================================================
-# 6. SPLIT DATA (80% TRAIN, 20% TEST) & FEATURE SCALING
+# 5. SPLIT DATA (80% TRAIN, 20% TEST) & FEATURE SCALING
 # ========================================================================
 # Split dilakukan sebelum StandardScaler untuk mencegah data leakage dari data uji
 X_train_raw, X_test_raw, y_train, y_test = train_test_split(
@@ -237,12 +208,12 @@ print(f"    y_test  : {y_test.shape} -> {y_test.value_counts().sort_index().to_d
 
 
 # ========================================================================
-# 7. BANGUN MODEL KLASIFIKASI (SEQUENTIAL MLP)
+# 6. BANGUN MODEL KLASIFIKASI (SEQUENTIAL MLP)
 # ========================================================================
 print("\n[6] Bangun Arsitektur Neural Network")
 
 model = Sequential([
-    Input(shape=(X_train.shape[1],)),   # Input layer: 11 fitur
+    Input(shape=(X_train.shape[1],)),   # Input layer: 13 fitur (UMUR_TAHUN, B..M)
     Dense(16, activation="relu"),       # Hidden Layer 1: 16 neuron, ReLU
     Dense(8, activation="relu"),        # Hidden Layer 2: 8 neuron, ReLU
     Dense(1, activation="sigmoid"),     # Output Layer: 1 neuron, Sigmoid
@@ -253,7 +224,7 @@ model.summary()
 
 
 # ========================================================================
-# 8. COMPILE DAN TRAIN MODEL
+# 7. COMPILE DAN TRAIN MODEL
 # ========================================================================
 print("\n[7] Compile Model")
 model.compile(
@@ -277,7 +248,7 @@ history = model.fit(
 
 
 # ========================================================================
-# 9. EVALUASI MODEL
+# 8. EVALUASI MODEL
 # ========================================================================
 print("\n[9] Evaluasi Model pada Data Testing")
 loss, acc = model.evaluate(X_test, y_test.to_numpy(), verbose=0)
@@ -286,7 +257,7 @@ print(f"    Akurasi di data uji: {acc * 100:.2f}%")
 
 
 # ========================================================================
-# 10. CONFUSION MATRIX
+# 9. CONFUSION MATRIX
 # ========================================================================
 y_pred_proba = model.predict(X_test, verbose=0)
 y_pred = (y_pred_proba > 0.5).astype(int).flatten()
@@ -301,7 +272,7 @@ print(f"     Actual 1         {cm[1][0]:5d}         {cm[1][1]:5d}")
 
 
 # ========================================================================
-# 11. VISUALISASI CONFUSION MATRIX
+# 10. VISUALISASI CONFUSION MATRIX
 # ========================================================================
 plt.figure(figsize=(6, 4.5))
 sns.heatmap(
@@ -309,12 +280,12 @@ sns.heatmap(
     annot=True,
     fmt="d",
     cmap="Blues",
-    xticklabels=["Tidak Sakit (0)", "Cardiovascular (1)"],
-    yticklabels=["Tidak Sakit (0)", "Cardiovascular (1)"],
+    xticklabels=["Kelas 0", "Kelas 1"],
+    yticklabels=["Kelas 0", "Kelas 1"],
 )
 plt.xlabel("Predicted")
 plt.ylabel("Actual")
-plt.title("Confusion Matrix - Deep Learning Cardiovascular Disease")
+plt.title("Confusion Matrix - Deep Learning (BlaBla.xlsx)")
 plt.tight_layout()
 cm_viz_path = os.path.join(result_dir, "viz_confusion_matrix.png")
 plt.savefig(cm_viz_path, dpi=120, bbox_inches="tight")
@@ -323,22 +294,22 @@ plt.show()
 
 
 # ========================================================================
-# 12. CLASSIFICATION REPORT & EKSPOR HASIL CSV DEEP LEARNING
+# 11. CLASSIFICATION REPORT & EKSPOR HASIL CSV DEEP LEARNING
 # ========================================================================
 print("\n[12] Classification Report:")
 report_text = classification_report(
     y_test,
     y_pred,
-    target_names=["Tidak Sakit (0)", "Cardiovascular (1)"],
+    target_names=["Kelas 0", "Kelas 1"],
 )
 print(report_text)
 
 # Simpan hasil prediksi pada data uji ke CSV
 pred_df = X_test_raw.copy()
-pred_df["cardio_actual"] = y_test.values
-pred_df["cardio_pred_proba"] = np.round(y_pred_proba.flatten(), 6)
-pred_df["cardio_pred"] = y_pred
-pred_df["prediksi_tepat"] = (pred_df["cardio_actual"] == pred_df["cardio_pred"]).astype(int)
+pred_df["N_actual"] = y_test.values
+pred_df["N_pred_proba"] = np.round(y_pred_proba.flatten(), 6)
+pred_df["N_pred"] = y_pred
+pred_df["prediksi_tepat"] = (pred_df["N_actual"] == pred_df["N_pred"]).astype(int)
 pred_csv_path = os.path.join(result_dir, "hasil_prediksi_deeplearning.csv")
 pred_df.to_csv(pred_csv_path, index=False)
 print(f"    -> Hasil prediksi data uji disimpan: {pred_csv_path}")
@@ -347,7 +318,7 @@ print(f"    -> Hasil prediksi data uji disimpan: {pred_csv_path}")
 report_dict = classification_report(
     y_test,
     y_pred,
-    target_names=["Tidak Sakit (0)", "Cardiovascular (1)"],
+    target_names=["Kelas 0", "Kelas 1"],
     output_dict=True,
 )
 eval_rows = []
@@ -369,7 +340,7 @@ print(f"    -> Riwayat training disimpan: {history_csv_path}")
 
 
 # ========================================================================
-# 13. VISUALISASI TRAINING HISTORY
+# 12. VISUALISASI TRAINING HISTORY
 # ========================================================================
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -404,14 +375,14 @@ plt.show()
 print("\n" + "=" * 70)
 print("  RINGKASAN HASIL DEEP LEARNING")
 print("=" * 70)
-print(f"  Dataset         : Cardiovascular Disease ({len(df)} awal -> {len(X)} bersih x {X.shape[1]} fitur)")
+print(f"  Dataset         : BlaBla.xlsx ({len(df)} baris x {X.shape[1]} fitur)")
 print(f"  Arsitektur      : Sequential MLP ({X_train.shape[1]} -> 16 -> 8 -> 1)")
 print("  Optimizer       : Adam")
 print("  Loss Function   : Binary Crossentropy")
 print("  Epochs          : 100")
 print(f"  Akurasi Testing : {acc * 100:.2f}%")
 print("\n  File Output (di folder dataset-csv-result/):")
-print("    - cardio_train_clean.csv")
+print("    - blabla_clean.csv")
 print("    - hasil_prediksi_deeplearning.csv")
 print("    - evaluasi_deeplearning.csv")
 print("    - training_history_deeplearning.csv")
